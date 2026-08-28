@@ -14,17 +14,20 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 const sessions = new Map();
+const completedUsers = new Set(); // Track users who already completed
+
+const ALREADY_DONE_MESSAGE =
+  "Du hast den Fragebogen bereits ausgefüllt. ✅\n\n" +
+  "Deine Bewerbung wird bearbeitet. Wir melden uns bei dir!";
 
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
-  console.log("🔑 Webhook verification attempt:", { mode, token });
   if (mode === "subscribe" && token === process.env.WEBHOOK_VERIFY_TOKEN) {
     console.log("✅ Webhook verified");
     return res.status(200).send(challenge);
   }
-  console.log("❌ Webhook verification failed");
   res.sendStatus(403);
 });
 
@@ -40,7 +43,7 @@ app.post("/webhook", async (req, res) => {
     const message = value?.messages?.[0];
 
     if (!message) {
-      console.log("ℹ️ No message in payload (status update or other event)");
+      console.log("ℹ️ No message in payload");
       return;
     }
 
@@ -48,6 +51,14 @@ app.post("/webhook", async (req, res) => {
     const msgBody = extractBody(message);
     console.log(`📩 Message from ${phone}: "${msgBody}" (type: ${message.type})`);
 
+    // --- DUPLICATE CHECK ---
+    if (completedUsers.has(phone)) {
+      console.log(`🔁 User ${phone} already completed. Sending duplicate message.`);
+      await sendText(phone, ALREADY_DONE_MESSAGE);
+      return;
+    }
+
+    // Get or create session
     if (!sessions.has(phone)) {
       sessions.set(phone, { step: 0, answers: {} });
       console.log(`🆕 New session for ${phone}, sending step 0`);
@@ -96,6 +107,7 @@ app.post("/webhook", async (req, res) => {
       const finalMsg = session.answers.telefon_ok?.toLowerCase() === "ja" ? FINAL_MESSAGE : FINAL_MESSAGE_NO_CALL;
       await sendText(phone, finalMsg);
       await appendRow(session.answers, phone);
+      completedUsers.add(phone); // Mark as completed
       sessions.delete(phone);
     }
   } catch (err) {
