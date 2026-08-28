@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const { STEPS, FINAL_MESSAGE, FINAL_MESSAGE_NO_CALL } = require("./flow");
 const { sendText, sendStep } = require("./whatsapp");
-const { appendRow, ensureHeaders } = require("./sheets");
+const { appendRow, ensureHeaders, phoneExists } = require("./sheets");
 
 const app = express();
 
@@ -14,7 +14,6 @@ app.use((req, res, next) => {
 app.use(express.json());
 
 const sessions = new Map();
-const completedUsers = new Set(); // Track users who already completed
 
 const ALREADY_DONE_MESSAGE =
   "Du hast den Fragebogen bereits ausgefüllt. ✅\n\n" +
@@ -51,11 +50,14 @@ app.post("/webhook", async (req, res) => {
     const msgBody = extractBody(message);
     console.log(`📩 Message from ${phone}: "${msgBody}" (type: ${message.type})`);
 
-    // --- DUPLICATE CHECK ---
-    if (completedUsers.has(phone)) {
-      console.log(`🔁 User ${phone} already completed. Sending duplicate message.`);
-      await sendText(phone, ALREADY_DONE_MESSAGE);
-      return;
+    // --- DUPLICATE CHECK (permanent — checks Google Sheet) ---
+    if (!sessions.has(phone)) {
+      const alreadyExists = await phoneExists(phone);
+      if (alreadyExists) {
+        console.log(`🔁 User ${phone} already in Google Sheet. Sending duplicate message.`);
+        await sendText(phone, ALREADY_DONE_MESSAGE);
+        return;
+      }
     }
 
     // Get or create session
@@ -107,7 +109,6 @@ app.post("/webhook", async (req, res) => {
       const finalMsg = session.answers.telefon_ok?.toLowerCase() === "ja" ? FINAL_MESSAGE : FINAL_MESSAGE_NO_CALL;
       await sendText(phone, finalMsg);
       await appendRow(session.answers, phone);
-      completedUsers.add(phone); // Mark as completed
       sessions.delete(phone);
     }
   } catch (err) {
