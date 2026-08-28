@@ -1,17 +1,9 @@
-// ============================================================
-// sheets.js — Append rows to Google Sheets
-// ============================================================
-
 const { google } = require("googleapis");
 
 let sheetsClient = null;
 
-/**
- * Initialize the Google Sheets API client
- */
 function getClient() {
   if (sheetsClient) return sheetsClient;
-
   const auth = new google.auth.GoogleAuth({
     credentials: {
       client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -19,31 +11,53 @@ function getClient() {
     },
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
-
   sheetsClient = google.sheets({ version: "v4", auth });
   return sheetsClient;
 }
 
 /**
+ * Check if a phone number already exists in the sheet
+ */
+async function phoneExists(phone) {
+  const sheets = getClient();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    range: "Bewerbungen!B:B",
+  });
+  const rows = res.data.values || [];
+  // Check every row in column B (phone numbers)
+  for (const row of rows) {
+    if (row[0] && row[0].replace(/\D/g, "") === phone.replace(/\D/g, "")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Append one applicant's answers as a new row
- *
- * @param {Object} answers — { sachkunde, erfahrung, bereiche, ... }
- * @param {string} phone   — WhatsApp phone number
  */
 async function appendRow(answers, phone) {
+  // Double-check for duplicates before writing
+  const exists = await phoneExists(phone);
+  if (exists) {
+    console.log(`⚠️ Phone ${phone} already in sheet — skipping duplicate`);
+    return false;
+  }
+
   const sheets = getClient();
   const now = new Date().toLocaleString("de-DE", { timeZone: "Europe/Berlin" });
 
   const row = [
-    now,                         // A — Datum
-    phone,                       // B — Telefonnummer
-    answers.sachkunde || "",     // C — Sachkundeprüfung §34a
-    answers.erfahrung || "",     // D — Bereits gearbeitet
-    answers.bereiche || "",      // E — Erfahrungsbereiche
-    answers.fuehrerschein || "", // F — Führerschein B
-    answers.schichtdienst || "", // G — Schichtdienst
-    answers.antritt || "",       // H — Stellenantritt
-    answers.telefon_ok || "",    // I — Telefonisch OK
+    now,
+    phone,
+    answers.sachkunde || "",
+    answers.erfahrung || "",
+    answers.bereiche || "",
+    answers.fuehrerschein || "",
+    answers.schichtdienst || "",
+    answers.antritt || "",
+    answers.telefon_ok || "",
   ];
 
   await sheets.spreadsheets.values.append({
@@ -54,6 +68,7 @@ async function appendRow(answers, phone) {
   });
 
   console.log(`✅ Row appended for ${phone}`);
+  return true;
 }
 
 /**
@@ -91,4 +106,4 @@ async function ensureHeaders() {
   }
 }
 
-module.exports = { appendRow, ensureHeaders };
+module.exports = { appendRow, ensureHeaders, phoneExists };
