@@ -1,4 +1,5 @@
 require("dotenv").config();
+const crypto = require("crypto");
 const express = require("express");
 const { STEPS, FINAL_MESSAGE, FINAL_MESSAGE_NO_CALL } = require("./flow");
 const { sendText, sendStep } = require("./whatsapp");
@@ -11,7 +12,32 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
+// Keep the raw body so the Meta signature can be verified.
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
+
+// Verifies the X-Hub-Signature-256 header sent by Meta.
+// Only enforced when META_APP_SECRET is set.
+function hasValidSignature(req) {
+  const secret = process.env.META_APP_SECRET;
+  if (!secret) return true;
+  const header = req.get("x-hub-signature-256") || "";
+  const expected =
+    "sha256=" + crypto.createHmac("sha256", secret).update(req.rawBody || "").digest("hex");
+  const a = Buffer.from(header);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+// Masks a phone number for logs, e.g. 4915901234567 -> ********4567
+function mask(phone) {
+  return String(phone).replace(/.(?=.{4})/g, "*");
+}
 
 const sessions = new Map();
 
@@ -31,9 +57,14 @@ app.get("/webhook", (req, res) => {
 });
 
 app.post("/webhook", async (req, res) => {
+  if (!hasValidSignature(req)) {
+    console.warn("⛔ Rejected webhook with invalid signature");
+    return res.sendStatus(401);
+  }
   res.sendStatus(200);
-  console.log("📨 Webhook POST received:");
-  console.log(JSON.stringify(req.body, null, 2));
+  if (process.env.DEBUG_WEBHOOK === "true") {
+    console.log(JSON.stringify(req.body, null, 2));
+  }
 
   try {
     const entry = req.body?.entry?.[0];
@@ -48,13 +79,13 @@ app.post("/webhook", async (req, res) => {
 
     const phone = message.from;
     const msgBody = extractBody(message);
-    console.log(`📩 Message from ${phone}: "${msgBody}" (type: ${message.type})`);
+    console.log(`📩 Message from ${mask(phone)} (type: ${message.type})`);
 
     // --- DUPLICATE CHECK (permanent — checks Google Sheet) ---
     if (!sessions.has(phone)) {
       const alreadyExists = await phoneExists(phone);
       if (alreadyExists) {
-        console.log(`🔁 User ${phone} already in Google Sheet. Sending duplicate message.`);
+        console.log(`🔁 User ${mask(phone)} already in Google Sheet. Sending duplicate message.`);
         await sendText(phone, ALREADY_DONE_MESSAGE);
         return;
       }
@@ -63,14 +94,14 @@ app.post("/webhook", async (req, res) => {
     // Get or create session
     if (!sessions.has(phone)) {
       sessions.set(phone, { step: 0, answers: {} });
-      console.log(`🆕 New session for ${phone}, sending step 0`);
+      console.log(`🆕 New session for ${mask(phone)}, sending step 0`);
       await sendStep(phone, STEPS[0]);
       return;
     }
 
     const session = sessions.get(phone);
     const currentStep = STEPS[session.step];
-    console.log(`📋 Session step ${session.step} (${currentStep.id}) for ${phone}`);
+    console.log(`📋 Session step ${session.step} (${currentStep.id}) for ${mask(phone)}`);
 
     let answer = msgBody;
 
@@ -80,7 +111,7 @@ app.post("/webhook", async (req, res) => {
         if (currentStep.id === "antritt" && msgBody.toLowerCase() === "später") {
           answer = "Später";
         } else {
-          console.log(`⚠️ Invalid button answer: "${msgBody}"`);
+          console.log(`⚠️ Invalid button answer at step ${currentStep.id}`);
           await sendText(phone, `Bitte wähle eine der Optionen: ${currentStep.buttons.join(", ")}`);
           return;
         }
@@ -90,7 +121,7 @@ app.post("/webhook", async (req, res) => {
     if (currentStep.type === "text" && currentStep.parse) {
       const parsed = currentStep.parse(msgBody);
       if (!parsed) {
-        console.log(`⚠️ Invalid text answer: "${msgBody}"`);
+        console.log(`⚠️ Invalid text answer at step ${currentStep.id}`);
         await sendText(phone, currentStep.errorMessage || "Ungültige Eingabe.");
         return;
       }
@@ -99,13 +130,13 @@ app.post("/webhook", async (req, res) => {
 
     session.answers[currentStep.id] = answer;
     session.step++;
-    console.log(`✅ Answer saved: ${currentStep.id} = "${answer}"`);
+    console.log(`✅ Answer saved for step ${currentStep.id}`);
 
     if (session.step < STEPS.length) {
       console.log(`➡️ Sending step ${session.step}`);
       await sendStep(phone, STEPS[session.step]);
     } else {
-      console.log(`🏁 Conversation complete for ${phone}`);
+      console.log(`🏁 Conversation complete for ${mask(phone)}`);
       const finalMsg = session.answers.telefon_ok?.toLowerCase() === "ja" ? FINAL_MESSAGE : FINAL_MESSAGE_NO_CALL;
       await sendText(phone, finalMsg);
       await appendRow(session.answers, phone);
@@ -126,10 +157,12 @@ app.get("/", (req, res) => {
   res.send("🤖 WhatsApp Bewerbungsbot is running!");
 });
 
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📋 PHONE_ID: ${process.env.WHATSAPP_PHONE_ID}`);
-  console.log(`🔑 TOKEN starts with: ${process.env.WHATSAPP_TOKEN?.substring(0, 10)}...`);
   try { await ensureHeaders(); } catch (err) { console.warn("⚠️ Sheet headers:", err.message); }
 });
