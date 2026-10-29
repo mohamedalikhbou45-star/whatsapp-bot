@@ -58,3 +58,16 @@ curl http://localhost:3000/health
 ## Continuous integration
 
 Every push runs a GitHub Actions workflow that installs the dependencies, checks all files for syntax errors, builds the Docker image and starts it to check the `/health` endpoint.
+
+## How I work with AI
+
+I build with AI coding agents (Claude Code) and treat them like a fast junior developer that needs clear direction:
+
+- **Context first:** [AGENTS.md](AGENTS.md) gives the agent the rules of this project (masked phone numbers, signature check, questionnaire and sheet columns kept in sync), so it doesn't have to guess.
+- **Small, reviewable steps:** one feature or fix per change, and I read every diff before committing.
+- **I own the decisions:** I designed the questionnaire with the recruiting team's needs in mind. The agent helps implement, and I test with real WhatsApp messages.
+- **Automated checks:** CI (syntax check, Docker build, health check) runs on every push, so mistakes from me or the agent are caught early.
+
+## About
+
+Built by Mohamed Ali Khbou, Computational Engineering Science student at TU Berlin.
