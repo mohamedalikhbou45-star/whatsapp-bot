@@ -1,7 +1,3 @@
-// ============================================================
-// whatsapp.js — Send messages via WhatsApp Cloud API
-// ============================================================
-
 const axios = require("axios");
 
 const API_URL = "https://graph.facebook.com/v19.0";

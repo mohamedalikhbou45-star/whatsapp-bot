@@ -1,7 +1,3 @@
-// ============================================================
-// flow.js — Conversation steps for the WhatsApp Bewerbungsbot
-// ============================================================
-
 const STEPS = [
   // STEP 0 — Welcome + Sachkundeprüfung
   {

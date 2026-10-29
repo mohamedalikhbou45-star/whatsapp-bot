@@ -41,7 +41,7 @@ async function appendRow(answers, phone) {
   // Double-check for duplicates before writing
   const exists = await phoneExists(phone);
   if (exists) {
-    console.log("⚠️ Phone already in sheet — skipping duplicate");
+    console.log("Phone already in sheet — skipping duplicate");
     return false;
   }
 
@@ -67,7 +67,7 @@ async function appendRow(answers, phone) {
     requestBody: { values: [row] },
   });
 
-  console.log("✅ Row appended to Google Sheet");
+  console.log("Row appended to Google Sheet");
   return true;
 }
 
@@ -102,7 +102,7 @@ async function ensureHeaders() {
         ],
       },
     });
-    console.log("📋 Headers created in Google Sheet");
+    console.log("Headers created in Google Sheet");
   }
 }
 
